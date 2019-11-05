@@ -1,0 +1,1055 @@
+module mojo_top (
+    input clk,              // 50MHz clock
+    input rst_n,            // reset button (active low)
+    output led [8],         // 8 user controllable LEDs
+    input cclk,             // configuration clock, AVR ready when high
+    output spi_miso,        // AVR SPI MISO
+    input spi_ss,           // AVR SPI Slave Select
+    input spi_mosi,         // AVR SPI MOSI
+    input spi_sck,          // AVR SPI Clock
+    output spi_channel [4], // AVR general purpose pins (used by default to select ADC channel)
+    input avr_tx,           // AVR TX (FPGA RX)
+    output avr_rx,          // AVR RX (FPGA TX)
+    input avr_rx_busy,      // AVR RX buffer full
+    output io_led [24],   // LEDs on IO Shield
+    output io_seg [8],      // 7-segment LEDs on IO Shield
+    output io_sel [4],      // Digit select on IO Shield
+    input io_button [5],    // 5 buttons on IO Shield
+    input io_dip [24]     // DIP switches on IO Shield
+    
+  ) {
+  
+  sig rst;                  // reset signal
+  sig a[16];                 // A[7:0] 16-bit input
+  sig b[16];                 // B[7:0] 16-bit input
+  sig alufn[6];             // ALUFN[5:0] 6-bit input
+  sig alu_out[16];           // ALU[7:0] 16-bit output of ALU
+  
+  alu alu;                  // Instantiating ALU module
+  
+  
+  .clk(clk) {
+    // The reset conditioner is used to synchronize the reset signal to the FPGA
+    // clock. This ensures the entire FPGA comes out of reset at the same time.
+    reset_conditioner reset_cond;
+    .rst(rst) {
+      multi_seven_seg seg;                                                                    // .luc file for controllingthe 4 7 segment LED displays
+      dff store_a[16];
+      dff store_b[16];
+      dff store_alufn[6]; 
+      dff store_temp[16];
+      dff store_z;
+      dff store_v;
+      dff store_n;   
+      dff counter[28];                                                                        // Counter for time delays between states
+      fsm state = {INITIAL,MANUAL,ADD, ADD_OF, SUBRACT, SUBRACT_OF, MULTIPLY, MULTIPLY_OF, MODULO,           // Finite state machine of states for test cases
+                   TESTCASE_ERROR_ADD, ERR_ADDER, EQ_TRUE, EQ_FALSE, LT_TRUE, LT_FALSE, LTEQ_TRUE, LTEQ_FALSE, 
+                   TESTCASE_ERROR_EQ_TRUE, ERR_COMP, AND, OR, XOR, NAND, NOR, XNOR, A, A_INVERT, B_INVERT, 
+                   TESTCASE_ERROR_AND, ERR_BOOL, SHL, SHR, SHA, ERR_SHIFT, TESTCASE_ERROR_SHL};
+    }
+  }
+  
+  always {
+    reset_cond.in = ~rst_n; // input raw inverted reset signal
+    rst = reset_cond.out;   // conditioned reset
+    led[4:0] = 5b0;             // turn LEDs off
+    spi_miso = bz;          // not using SPI
+    spi_channel = bzzzz;    // not using flags
+    avr_rx = bz;            // not using serial port
+    io_led[22:16] = 7b0;    // turn LEDs off
+    io_led[23]=io_dip[23];
+    io_seg = 8hff;          // turn segments off
+    io_sel = 4hf;           // select no digits
+    io_seg = ~seg.seg;      // connect segments to the driver
+    io_sel = ~seg.sel;      // connect digit select to the driver
+    
+    //seg.values = {4hc,4hc,4hc,4hc}; // Test '----'
+    
+    a = io_dip[15:0];             // Right and middle switches for manual A input
+    b = io_dip[15:0];             // Right and middle switches for manual B input
+    alufn = io_dip[21:16];    // Left switches 16-21 for ALUFN input
+    
+    alu.a = a;                 // Link inputs
+    alu.b = b;
+    alu.alufn = alufn;
+    alu_out = alu.alu_out;     // Link output
+    
+    io_led[15:0] = io_dip[15:0];     // Right and middle row of 16 leds to display A input
+    //io_led[15:0] = io_dip[15:0];     // Right and middle row of 16 leds to display B input
+    //io_led[15:0]= alu_out;       // Right and middle row of 16 leds to display ALU output
+    led[7] = alu.z;       // LED[7] on when output is 0
+    led[6] = alu.v;       // LED[6] on when outpu overflows
+    led[5] = alu.n;       // LED[5] on when ouput is negative
+
+    
+    case (state.q) {
+    
+      state.INITIAL:
+      io_led[23] = b0;
+      seg.values = {4hd ,4hd,4hd,4hd};
+        //if(io_button[1] == 1){      //if button is pressed, move to next state
+           //state.d = state.ADD;
+        //} 
+          if(io_button[4] == 1){      //if button is pressed, move to next state
+           state.d = state.ADD;
+        }
+        if(io_dip[23]==1){           //if dip switch is down, change from auto testing to manual testing
+            seg.values = {4hd,4h0,4h0,4h0};
+            state.d = state.MANUAL;
+        }
+    
+    
+    
+    
+    
+    state.MANUAL: //manual test state
+    //io_led[23] = io_dip[23]; 
+    //seg.values = {4b0,4b0,4b0,4b0};
+    /*if(io_button[0]){               //if switch[0][1] is high, switch[1] and switch[2] become inputs for a
+        a[15:0] = io_dip[15:0];
+        store_a.d = a;
+        store_temp.d = a;          
+    } */
+    if(io_button[0]){               //if switch[0][1] is high, switch[1] and switch[2] become inputs for a
+        a[15:0] = io_dip[15:0];
+        store_a.d = a;
+        store_temp.d = a;          
+    }        
+        
+    /*if(io_button[1]){                        //if switch[0][1] is low, switch[1] and switch[2] become inputs for b
+        b[15:0] = io_dip[15:0];
+          store_b.d = b;
+          store_temp.d = b;
+     }*/
+    if(io_button[1]){                        //if switch[0][1] is low, switch[1] and switch[2] become inputs for b
+        b[15:0] = io_dip[15:0];
+          store_b.d = b;
+          store_temp.d = b;
+     }       
+        
+    /*if(io_button[2]){
+        alufn = io_dip[21:16];              //if button is pressed, store input alufn into a d flip flip
+        store_alufn.d = alufn;
+        alu.alufn = store_alufn.q;       //input stored value of alufn into module alu  
+        //alu = ; 
+        store_temp.d = alu_out;
+        
+     }*/
+         if(io_button[2]){
+        alufn = io_dip[21:16];              //if button is pressed, store input alufn into a d flip flip
+        store_alufn.d = alufn;
+          
+        alu.alufn = store_alufn.q;       //input stored value of alufn into module alu  
+        alu.a = store_a.q;         //input stored value of a into module alu
+        alu.b = store_b.q;         //input stored value of b into module alu
+        alu.alufn = store_alufn.q;       //input stored value of alufn into module alu  
+        //alu = alu_out;
+          
+        store_z.d = alu.z;
+        store_v.d = alu.v;
+        store_n.d = alu.n;
+        store_temp.d = alu_out;
+        }  
+          
+        
+           
+           
+          
+     /*if(io_button[3]){             //if button is pressed, reset a,b,alufn
+        store_a.d = 16b0;
+        store_b.d = 16b0;
+        store_alufn.d = 6b0;
+     }*/
+       if(io_button[3]){             //if button is pressed, reset a,b,alufn
+        store_a.d = 16b0;
+        store_b.d = 16b0;
+        store_alufn.d = 6b0;
+        store_temp.d = 16b0;
+        store_z.d = b0;
+        store_v.d = b0;
+        store_n.d = b0;
+     }     
+        
+      //alu.a = store_a.q;         //input stored value of a into module alu
+      //alu.b = store_b.q;         //input stored value of b into module alu
+      //alumod.alufn = store_alufn.q; //input stored value of alufn into module alu
+      //alu = alumod.result;             //assigning alu to output of module alu
+      //io_led[15:0] = alu[15:0];         //display alu output on onboard leds
+      io_led[15:0] = store_temp.q;
+      
+      // ONLY FOR MANUAL MODE: 
+      // Show Z, V, N results on io_seg screen
+      if(store_z.q == b1){seg.values[2] = h1;} else{ seg.values[2] = h0; } // if Z==1: 2nd io_seg=1
+      if(store_v.q == b1){seg.values[1] = h1;} else{ seg.values[1] = h0; } // if V==1: 3rd io_seg=1
+      if(store_n.q == b1){seg.values[0] = h1;} else{ seg.values[0] = h0; } // if N==1: 4th io_seg=1  
+      
+      // Show ALUFN[5:0] on io_led[21:16]
+      io_led[21:16] = store_alufn.q;  
+      /*io_led[18] = alumod.z;
+      io_led[17] = alumod.v;
+      io_led[16] = alumod.n;*/  
+       if(!io_dip[23]){
+        store_a.d = 16b0;
+        store_b.d = 16b0;
+        store_alufn.d = 6b0;
+        store_temp.d = 16b0;
+        store_z.d = b0;
+        store_v.d = b0;
+        store_n.d = b0;
+          state.d = state.INITIAL;
+          }
+          
+    //testcase for addition (expected output : 16b0000000000000101)
+    state.ADD:                 //selecting state ADD
+    alu.alufn = 6b000000;         //selecting ADD alufn
+    alu.a = 16b0000000000000010;           //input a : 16b0000000000000010 (2)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000010;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000101;       //displaying expected output on LED (5)
+    seg.values = {4hd,4hd,4he,4h1};   //segment lights of A1
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SUB)
+        counter.d = 0;
+        state.d = state.SUBRACT;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000101 == 1){      //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SHA)
+        counter.d=0;
+        state.d=state.SHA;
+        }  
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to ADD_OF state (toggle between ADD & ADD_OF)
+        counter.d=0;
+        state.d=state.ADD_OF;
+        }  
+    
+    
+    //testcase for ADD_OF (expected output : 16b0000000010000000)
+    state.ADD_OF:                 //selecting state ADD_OF
+    alu.alufn = 6b000000;         //selecting ADD alufn
+    alu.a = 16b100000000000000;           //input a : 16b1000000000000000 (64)
+    alu.b = 16b100000000000000;           //input b : 16b1000000000000000 (64)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000001000000;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000001000000;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000010000000;       //displaying expected output on LED (-128)
+    seg.values = {4hd,4hd,4he,4h2};   //segment lights of A2
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SUB)
+        counter.d = 0;
+        state.d = state.SUBRACT;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000000 == 1){      //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SHA)
+        counter.d=0;
+        state.d=state.SHA;
+        }  
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to ADD state (toggle between ADD & ADD_OF)
+        counter.d=0;
+        state.d=state.ADD;
+        }    
+    
+
+    //testcase for subtraction (expected output : 16b0000000000000100)
+    state.SUBRACT:                    //selecting state SUB
+    alu.alufn = 6b000001;         //selecting SUB_OF alufn
+    alu.a = 16b0000000000000111;           //input a : 16b0000000000000111 (7)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000111;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000100;       //displaying expected output on LED (4)
+    seg.values = {4hd,4hd,4he,4h3};    //segment lights of A3
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (MUL)
+        counter.d = 0;
+        state.d = state.MULTIPLY;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000100){                           //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (ADD)
+        counter.d=0;
+        state.d=state.ADD;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to SUB_OF state (toggle between SUB & SUB_OF)
+        counter.d=0;
+        state.d=state.SUBRACT_OF;
+        }     
+    
+    
+    //testcase for SUB_OF (expected output : 16b0000000001111111)
+    state.SUBRACT_OF:                    //selecting state SUB_OF
+    alu.alufn = 6b000001;         //selecting SUB alufn
+    alu.a = 16b0000000010000000;           //input a : 16b0000000010111111 (-128)
+    alu.b = 16b0000000000000001;           //input b : 16b0000000001000000 (1)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000010000000;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000001111111;       //displaying expected output on LED (-129)
+    seg.values = {4hd,4hd,4he,4h4};    //segment lights of A4
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000001111111 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (MUL)
+        counter.d = 0;
+        state.d = state.MULTIPLY;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000001111111){                            //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000001111111 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (ADD)
+        counter.d=0;
+        state.d=state.ADD;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000001111111 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to SUB state (toggle between SUB & SUB_OF)
+        counter.d=0;
+        state.d=state.SUBRACT;
+        }         
+      
+    
+    
+    //testcase for multiplication (expected output : 16b0000000000000110)
+    state.MULTIPLY:                 //selecting state MUL
+    alu.alufn = 6b000010;         //selecting MUL_OF alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000010;           //input b : 16b0000000000000010 (2)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000010;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000110;       //displaying expected output on LED (6)
+    seg.values = {4hd,4hd,4he,4h5};    //segment lights of A5
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000110 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (MOD)
+        counter.d = 0;
+        state.d = state.MODULO;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000110 ){                          //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000110 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SUB)
+        counter.d=0;
+        state.d=state.SUBRACT;
+        }         
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000110 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to MUL_OF state (toggle)
+        counter.d=0;
+        state.d=state.MULTIPLY_OF;
+        }        
+    
+    //testcase for MUL_OF (expected output : 16b0000000000000110) (INCOMPLETE)
+    state.MULTIPLY_OF:                 //selecting state MUL_OF
+    alu.alufn = 6b000010;         //selecting MUL alufn
+      
+    alu.a = 16b0000000000010000;           //input a : 16b0000000000010000 (16)
+    alu.b = 16b0000000000010000;           //input b : 16b0000000000010000 (16)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000010000;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000010000;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000000;       //displaying expected output on LED (0)
+    seg.values = {4hd,4hd,4he,4h6};    //segment lights of A6
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (MOD)
+        counter.d = 0;
+        state.d = state.MODULO;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000000){                          //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SUB)
+        counter.d=0;
+        state.d=state.SUBRACT;
+        }         
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to MUL_OF state (toggle)
+        counter.d=0;
+        state.d=state.MULTIPLY;
+        }      
+      
+      
+
+    
+    //testcase for modulo (expected output : 16b0000000000000001)
+    state.MODULO:                 //selecting state MOD
+    alu.alufn = 6b000011;         //selecting MOD alufn
+    alu.a = 16b0000000000000101;           //input a : 16b0000000000000101 (5)
+    alu.b = 16b0000000000000010;           //input b : 16b0000000000000010 (2)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000010;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying expected output on LED (1)
+    seg.values = {4hd,4hd,4he,4h7};  //segment lights of A7
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (EQ_TRUE)
+        counter.d = 0;
+        state.d = state.TESTCASE_ERROR_ADD;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000001 ){                          //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (MUL_OF)
+        counter.d=0;
+        state.d=state.MULTIPLY;
+        }           
+    
+       //testcase for ERROR OF ADDER (expected output : 16b0000000000000101)
+    state.TESTCASE_ERROR_ADD:                    //selecting state ADD
+    alu.alufn = 6b000000;         //selecting ADD alufn
+    alu.a = 16b0000000000000010;           //input a : 16b0000000000000010 (2)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out+1;  //output of the operation + 1, to generate error
+    ////io_led[15:0] = 16b0000000000000010;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000101;       //displaying expected output on LED (5)
+    seg.values = {4hd,4hd,4he,4ha};   //segment lights of AE
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SUB)
+        counter.d = 0;
+        state.d = state.SUBRACT;
+        }
+      else if (counter.q[27] == 1 && alu_out != 16b0000000000000101){                            //if output is wrong, move to error state (ERR_ADDER)
+        counter.d=0;
+        state.d=state.ERR_ADDER;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SHA)
+        counter.d=0;
+        state.d=state.SHA;
+        }  
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000101 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to ADD_OF state (toggle between ADD & ADD_OF)
+        counter.d=0;
+        state.d=state.ADD_OF;
+        }  
+
+    
+      //ERROR STATE OF ADDER
+      state.ERR_ADDER:
+      seg.values = {4ha,4hb,4hb,4he};                           //segment lights of "ErrA"
+      counter.d = counter.q+1;
+      if (counter.q[24] == 1 && io_button[4] == 1){        //if right button is pressed, move to next state (EQ_TRUE) 
+        counter.d = 0;
+        state.d = state.EQ_TRUE;
+        }  
+
+    
+    //testcase for EQ_TRUE (expected output : 16b0000000000000001)
+    state.EQ_TRUE:                    //selecting state EQ_TRUE
+    alu.alufn = 6b110011;         //selecting EQ_TRUE alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying expected output on LED (TRUE)
+    seg.values = {4hd,4hd,4h9,4h1};    //segment lights of C1
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (LT_TRUE)
+        counter.d = 0;
+        state.d = state.LT_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000001){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (TESTCASE_ERROR_ADD)
+        counter.d=0;
+        state.d=state.MODULO;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to EQ_FALSE state (toggle between EQ_TRUE & EQ_FALSE)
+        counter.d=0;
+        state.d=state.EQ_FALSE;
+        }     
+    
+    //testcase for EQ_FALSE (expected output : 16b0000000000000000)
+    state.EQ_FALSE:               //selecting state EQ_FALSE
+    alu.alufn = 6b110011;         //selecting EQ_TRUE alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000111;           //input b : 16b0000000000000011 (7)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000111;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000000;       //displaying expected output on LED (FALSE)
+    seg.values = {4hd,4hd,4h9,4h2};    //segment lights of C2
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (LT_TRUE)
+        counter.d = 0;
+        state.d = state.LT_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000000){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (TESTCASE_ERROR_ADD)
+        counter.d=0;
+        state.d=state.TESTCASE_ERROR_ADD;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to EQ_TRUE state (toggle between EQ_TRUE & EQ_FALSE)
+        counter.d=0;
+        state.d=state.EQ_TRUE;
+        }     
+ 
+    //testcase for LT_TRUE (expected output : 16b0000000000000001)
+    state.LT_TRUE:               //selecting state LT_TRUE
+    alu.alufn = 6b110101;         //selecting LT_TRUE alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000111;           //input b : 16b0000000000000011 (7)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000111;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying expected output on LED (TRUE)
+    seg.values = {4hd,4hd,4h9,4h3};    //segment lights of C3
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (LTEQ_TRUE)
+        counter.d = 0;
+        state.d = state.LTEQ_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000001){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (EQ_TRUE)
+        counter.d=0;
+        state.d=state.EQ_TRUE;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to LT_FALSE state (toggle between LT_TRUE & LT_FALSE)
+        counter.d=0;
+        state.d=state.LT_FALSE;
+        }      
+         
+    //testcase for LT_FALSE (expected output : 16b0000000000000000)
+    state.LT_FALSE:               //selecting state LT_FALSE
+    alu.alufn = 6b110101;         //selecting LT_TRUE alufn
+    alu.a = 16b0000000000000111;           //input a : 16b0000000000000011 (7)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000111;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000000;       //displaying expected output on LED (FALSE)
+    seg.values = {4hd,4hd,4h9,4h4};    //segment lights of C4
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (LTEQ_TRUE)
+        counter.d = 0;
+        state.d = state.LTEQ_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000000){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (EQ_TRUE)
+        counter.d=0;
+        state.d=state.EQ_TRUE;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to LT_TRUE state (toggle between LT_TRUE & LT_FALSE)
+        counter.d=0;
+        state.d=state.LT_TRUE;
+        }     
+         
+    //testcase for LTEQ_TRUE (expected output : 16b0000000000000001)
+    state.LTEQ_TRUE:               //selecting state LTEQ_TRUE
+    alu.alufn = 6b110111;         //selecting LTEQ_TRUE alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying expected output on LED (TRUE)
+    seg.values = {4hd,4hd,4h9,4h5};    //segment lights of C5
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (TESTCASE_ERROR_EQ_TRUE)
+        counter.d = 0;
+        state.d = state.TESTCASE_ERROR_EQ_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000001){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (LT_TRUE)
+        counter.d=0;
+        state.d=state.LT_TRUE;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to LTEQ_FALSE state (toggle between LTEQ_TRUE & LTEQ_FALSE)
+        counter.d=0;
+        state.d=state.LTEQ_FALSE;
+        }         
+         
+    //testcase for LTEQ_FALSE (expected output : 16b0000000000000000)
+    state.LTEQ_FALSE:               //selecting state LTEQ_FALSE
+    alu.alufn = 6b110111;         //selecting LTEQ_TRUE alufn
+    alu.a = 16b0000000000000111;           //input a : 16b0000000000000011 (7)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000111;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000000;       //displaying expected output on LED (FALSE)
+    seg.values = {4hd,4hd,4h9,4h6};    //segment lights of C6
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (TESTCASE_ERROR_EQ_TRUE)
+        counter.d = 0;
+        state.d = state.TESTCASE_ERROR_EQ_TRUE;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000000){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (LT_TRUE)
+        counter.d=0;
+        state.d=state.LT_TRUE;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000000 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to LTEQ_TRUE state (toggle between LTEQ_TRUE & LTEQ_FALSE)
+        counter.d=0;
+        state.d=state.LTEQ_TRUE;
+        }       
+    
+        //testcase for TESTCASE_ERROR_EQ_TRUE (expected output : 16b0000000000000001)
+    state.TESTCASE_ERROR_EQ_TRUE:                    //selecting state EQ_TRUE
+    alu.alufn = 6b110011;         //selecting EQ_TRUE alufn
+    alu.a = 16b0000000000000011;           //input a : 16b0000000000000011 (3)
+    alu.b = 16b0000000000000011;           //input b : 16b0000000000000011 (3)
+    alu_out = alu.alu_out-1 ;  //output of the operation -1 (TO CAUSE ERROR)
+    ////io_led[15:0] = 16b0000000000000011;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000001;       //displaying expected output on LED (TRUE)
+    seg.values = {4hd,4hd,4h9,4ha};    //segment lights of CE
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (LT_TRUE)
+        counter.d = 0;
+        state.d = state.LT_TRUE;
+        }
+      else if (counter.q[27] == 1 && alu_out != 16b0000000000000001){                          //if output is wrong, move to error state (ERR_COMP)
+        counter.d=0;
+        state.d=state.ERR_COMP;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (TESTCASE_ERROR_ADD)
+        counter.d=0;
+        state.d=state.LTEQ_TRUE;
+        }     
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000001 && io_button[0] == 1){      //if output is correct and middle button is pressed, move to EQ_FALSE state (toggle between EQ_TRUE & EQ_FALSE)
+        counter.d=0;
+        state.d=state.EQ_FALSE;
+        }     
+         
+    
+      //ERROR STATE OF COMPARATOR
+      state.ERR_COMP:
+      seg.values = {4ha,4hb,4hb,4h9};                           //segment lights of "ErrC"
+      counter.d = counter.q+1;
+      if (counter.q[24] == 1 && io_button[4] == 1){        //if right button is pressed, move to next state (AND) 
+        counter.d = 0;
+        state.d = state.AND;
+        }         
+    
+    
+    
+     //testcase for AND (expected output : 16b0000000000000100)
+    state.AND:                 //selecting AND state
+    alu.alufn = 6b011000;         //selecting AND on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000100;       //displaying expected output on LED (4)
+    seg.values = {4hd, 4hd, 4hc, 4h1};              //segment lights of B1
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (OR)
+        counter.d = 0;
+        state.d = state.OR;
+        }
+      if (counter.q[24] == 1 && alu_out != 16b0000000000000100){                                  //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (LTEQ_TRUE)
+        counter.d=0;
+        state.d=state.LTEQ_TRUE;
+        }       
+    
+ 
+       
+     //testcase for OR (expected output : 16b0000000000001110)
+    state.OR:                 //selecting OR state
+    alu.alufn = 6b011110;         //selecting OR on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000001110;       //displaying expected output on LED (14)
+    seg.values = {4hd, 4hd, 4hc, 4h2};              //segment lights of B2
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out== 16b0000000000001110 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (XOR)
+        counter.d = 0;
+        state.d = state.XOR;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000001110){                          //if output is wrong , move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000001110 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (AND)
+        counter.d=0;
+        state.d=state.AND;
+        }       
+  
+     //testcase for XOR (expected output : 16b0000000000001010)
+    state.XOR:                 //selecting XOR state
+    alu.alufn = 6b010110;         //selecting XOR on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000001010;       //displaying expected output on LED (10)
+    seg.values = {4hd, 4hd, 4hc, 4h3};              //segment lights of B3
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000001010 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (A)
+        counter.d = 0;
+        state.d = state.A;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000001010){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000001010 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (OR)
+        counter.d=0;
+        state.d=state.OR;
+        }       
+    
+
+    
+     //testcase for A (expected output : 16b0000000000000110)
+    state.A:                 //selecting NOTA state
+    alu.alufn = 6b011010;         //selecting A on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000110;       //displaying expected output on LED (6)
+    seg.values = {4hd, 4hd, 4hc, 4h4};              //segment lights of B4
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000110 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (NOTA)
+        counter.d = 0;
+        state.d = state.A_INVERT;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000110){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000110 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (XOR)
+        counter.d=0;
+        state.d=state.XOR;
+        }    
+             
+    
+   
+    
+    
+    
+    //testcase for NOTA (expected output : 16b0000000011111001)
+    state.A_INVERT:                 //selecting NOTA state
+    alu.alufn = 6b010101;         //selecting NOTA on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000011111001;       //displaying expected output on LED (?)
+    seg.values = {4hd, 4hd, 4hc, 4h5};              //segment lights of B5
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011111001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (NOTB)
+        counter.d = 0;
+        state.d = state.B_INVERT;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011111001){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011111001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (A)
+        counter.d=0;
+        state.d=state.A;
+        }    
+             
+    
+    
+    
+    
+      
+     //testcase for NOTB (expected output : 16b0000000011110011)
+    state.B_INVERT:                 //selecting NOTB state
+    alu.alufn = 6b010011;         //selecting NOTB on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000011110011;       //displaying expected output on LED (?)
+    seg.values = {4hd, 4hd, 4hc, 4h6};              //segment lights of B6
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011110011 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (NOR)
+        counter.d = 0;
+        state.d = state.NOR;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011110011){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011110011 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (NOTA)
+        counter.d=0;
+        state.d=state.A_INVERT;
+        }    
+         
+
+     //testcase for NOR (expected output : 16b0000000011110001)
+    state.NOR:                    //selecting NOR state
+    alu.alufn = 6b010001;         //selecting NOR on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000011110001;       //displaying expected output on LED
+    seg.values = {4hd, 4hd, 4hc, 4h7};              //segment lights of B7
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011110001 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (NAND)
+        counter.d = 0;
+        state.d = state.NAND;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011110001){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011110001 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (NOTB)
+        counter.d=0;
+        state.d=state.B_INVERT;
+        }    
+
+    
+     //testcase for NAND (expected output : 16b0000000011111011)
+    state.NAND:                    //selecting NAND state
+    alu.alufn = 6b010111;         //selecting NAND on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000011111011;       //displaying expected output on LED
+    seg.values = {4hd, 4hd, 4hc, 4h8};              //segment lights of B8
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011111011 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (XNOR)
+        counter.d = 0;
+        state.d = state.XNOR;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011111011){                            //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011111011 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (NOR)
+        counter.d=0;
+        state.d=state.NOR;
+        }    
+    
+    
+    //testcase for XNOR (expected output : 16b0000000011110101)
+    state.XNOR:                    //selecting XNOR state
+    alu.alufn = 6b011001;         //selecting XNOR on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000011110101;       //displaying expected output on LED (5)
+    seg.values = {4hd, 4hd, 4hc, 4h0};              //segment lights of B0
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011110101 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SHL)
+        counter.d = 0;
+        state.d = state.TESTCASE_ERROR_AND;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011110101){                          //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011110101 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (NAND)
+        counter.d=0;
+        state.d=state.NAND;
+        }    
+        
+    //testcase for TESTCASE_ERROR_AND (expected output : 16b0000000000000100)
+    state.TESTCASE_ERROR_AND:                    //selecting AND state
+    alu.alufn = 6b011000;         //selecting AND on alufn
+    alu.a = 16b0000000000000110;           //input a : 16b0000000000000110 (6)
+    alu.b = 16b0000000000001100;           //input b : 16b0000000000001100 (12)
+    alu_out = alu.alu_out +1;  //output of the operation +1 (FOR ERROR)
+    ////io_led[15:0] = 16b0000000000000110;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000001100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000000100;       //displaying expected output on LED (4)
+    seg.values = {4hd,4hd,4hc,4ha};              //segment lights of BE
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (OR)
+        counter.d = 0;
+        state.d = state.SHL;
+        }
+      else if (counter.q[27] == 1 && alu_out != 16b0000000000000100){                            //if output is wrong, move to error state (ERR_BOOL)
+        counter.d=0;
+        state.d=state.ERR_BOOL;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000100 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (LTEQ_TRUE)
+        counter.d=0;
+        state.d=state.LTEQ_TRUE;
+        }       
+   
+    
+      //ERROR STATE OF BOOLEAN
+      state.ERR_BOOL:
+      seg.values = {4ha,4hb,4hb,4hc};                           //segment lights of "ErrB"
+      counter.d = counter.q+1;
+      if (counter.q[24] == 1 && io_button[4] == 1){        //if right button is pressed, move to next state (SHL) 
+        counter.d = 0;
+        state.d = state.SHL;
+        }   
+
+    //testcase for shifting left (expected output : 16b0000000000110000)
+    state.SHL:                    //selecting state
+    alu.alufn = 6b100000;         //selecting shift left on alufn
+    alu.a = 16b0000000000001100;           //input a : 16b0000000000001100
+    alu.b = 16b0000000000000010;           //input b : 16b0000000000000100 (selecting b2 which shifts 4 bits)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000001100;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000010;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000110000;       //displaying expected output on LED
+    seg.values = {4hd, 4hd, 4hf, 4h1};              //segment lights of S1
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000110000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SHR)
+        counter.d = 0;
+        state.d = state.SHR;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000110000){                          //if output is wrong, move to error state (ERR_SHIFT)
+        counter.d=0;
+        state.d=state.ERR_SHIFT;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000110000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (XNOR)
+        counter.d=0;
+        state.d=state.XNOR;
+        }   
+    
+    
+    //testcase for shifting right (expected output : 16b0000000000000011)
+    state.SHR:                    //selecting state
+    alu.alufn = 6b100001;         //selecting shift right on alufn
+    alu.a = 16b0000000000001100;           //input a : 16b0000000000001100
+    alu.b = 16b0000000000000010;           //input b : 16b0000000000000100 (selecting b2 which shifts 4 bits)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000000001100;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000010;       // displaying b on LED
+    ////io_led[15:0] = 16b0000000000000011;       //displaying expected output on LED
+    seg.values = {4hd, 4hd, 4hf, 4h2};              //segment lights of S2
+    
+        counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000000011 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SHA)
+        counter.d = 0;
+        state.d = state.SHA;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000000000011){                            //if output is wrong, move to error state (ERR_SHIFT)
+        counter.d=0;
+        state.d=state.ERR_SHIFT;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000000011 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SHL)
+        counter.d=0;
+        state.d=state.SHL;
+        }
+    
+    
+    //testcase for shifting right with sign extension (expected output : 16b0000000010001100)
+    state.SHA:                    //selecting state
+    alu.alufn = 6b100011;         //selecting shift right on alufn
+    alu.a = 16b0000000010001100;           //input a : 16b0000000000001100
+    alu.b = 16b0000000000000010;           //input b : 16b0000000000000100 (selecting b2 which shifts 4 bits)
+    alu_out = alu.alu_out;  //output of the operation
+    ////io_led[15:0] = 16b0000000010001100;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000010;       // displaying b on LED
+    ////io_led[15:0] = 16b0000000011100011;       //displaying expected output on LED
+    seg.values = {4hd, 4hd, 4hf, 4h3};              //segment lights of S3
+    
+        counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000011100011 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (ADD_OF)
+        counter.d = 0;
+        state.d = state.TESTCASE_ERROR_SHL;
+        }
+      else if (counter.q[24] == 1 && alu_out != 16b0000000011100011){                            //if output is wrong, move to error state (ERR_SHIFT)
+        counter.d=0;
+        state.d=state.ERR_SHIFT;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000011100011 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (SHR)
+        counter.d=0;
+        state.d=state.SHR;
+        }   
+        
+    //testcase for TESTCASE_ERROR_SHL (expected output : 16b0000000000110000)
+    state.TESTCASE_ERROR_SHL:                    //selecting state
+    alu.alufn = 6b100000;         //selecting shift left on alufn
+    alu.a = 16b0000000000001100;           //input a : 16b0000000000001100
+    alu.b = 16b0000000000000100;           //input b : 16b0000000000000100 (selecting b2 which shifts 4 bits)
+    alu_out = alu.alu_out+1;  //output of the operation (+ 1 FOR ERROR)
+    ////io_led[15:0] = 16b0000000000001100;       //displaying a on LED
+    ////io_led[15:0] = 16b0000000000000100;       //displaying b on LED
+    ////io_led[15:0] = 16b0000000000110000;       //displaying expected output on LED
+    seg.values = {4hd,4hd,4hf,4ha};              //segment lights of SE
+    
+    counter.d = counter.q+1;
+      if (counter.q[24] == 1 && alu_out == 16b0000000000110000 && io_button[4] == 1){           //if output is correct & right button pressed, move to next state (SHR)
+        counter.d = 0;
+        state.d = state.SHR;
+        }
+      else if (counter.q[27] == 1 && alu_out != 16b0000000000110000 ){                          //if output is wrong, move to error state (ERR_SHIFT)
+        counter.d=0;
+        state.d=state.ERR_SHIFT;
+        }    
+      else if (counter.q[24] == 1 && alu_out == 16b0000000000110000 && io_button[3] == 1){      //if output is correct and left button is pressed, move to previous state (XNOR)
+        counter.d=0;
+        state.d=state.XNOR;
+        }       
+    
+      //ERROR STATE OF SHIFTER
+      state.ERR_SHIFT:
+      seg.values = {4ha,4hb,4hb,4hf};                           //segment lights of "ErrS"
+      counter.d = counter.q+1;
+      if (counter.q[24] == 1 && io_button[4] == 1){        //if right button is pressed, move to next state (ADD) 
+        counter.d = 0;
+        state.d = state.ADD;
+        }    
+    }
+  }
+}
+
